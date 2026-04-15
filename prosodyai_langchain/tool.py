@@ -39,7 +39,7 @@ class ProsodyTool(BaseTool):
     args_schema: Type[BaseModel] = ProsodyToolInput
 
     api_key: str
-    base_url: str = "https://api.prosody.ai"
+    base_url: str = "https://api.prosodyai.app"
     vertical: Optional[str] = None
     session_id: Optional[str] = None
 

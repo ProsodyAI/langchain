@@ -16,7 +16,7 @@ class ProsodyClient:
     def __init__(
         self,
         api_key: str,
-        base_url: str = "https://api.prosody.ai",
+        base_url: str = "https://api.prosodyai.app",
     ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
