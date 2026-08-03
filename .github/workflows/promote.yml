@@ -1,0 +1,169 @@
+name: Promote and notify root
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+
+permissions:
+  contents: read
+
+jobs:
+  promote-dev:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'dev'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      RELEASE_TOKEN: ${{ secrets.PROSODYAI_RELEASE_TOKEN }}
+      DEV_SHA: ${{ github.event.workflow_run.head_sha }}
+      CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+
+    steps:
+      - name: Skip promotion when no release token is configured
+        if: env.RELEASE_TOKEN == ''
+        run: echo "::notice::Release token is not configured; dev remains available for manual promotion."
+
+      - name: Create or update the dev to main pull request
+        if: env.RELEASE_TOKEN != ''
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          github-token: ${{ secrets.PROSODYAI_RELEASE_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const devSha = process.env.DEV_SHA;
+            const runUrl = process.env.CI_RUN_URL;
+
+            if (!/^[0-9a-f]{40}$/.test(devSha)) {
+              core.setFailed(`Invalid dev SHA: ${devSha}`);
+              return;
+            }
+
+            const currentDev = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: "heads/dev",
+            });
+            if (currentDev.data.object.sha !== devSha) {
+              core.notice(
+                `Skipping stale CI SHA ${devSha}; current dev is ${currentDev.data.object.sha}.`,
+              );
+              return;
+            }
+
+            const comparison = await github.rest.repos.compareCommitsWithBasehead({
+              owner,
+              repo,
+              basehead: "main...dev",
+            });
+            if (comparison.data.ahead_by === 0) {
+              core.info("dev has no commits to promote.");
+              return;
+            }
+
+            const body = [
+              "Promotes the current tested `dev` branch to `main`.",
+              "",
+              `- Tested dev SHA: \`${devSha}\``,
+              `- Successful CI run: ${runUrl}`,
+              "",
+              "This pull request is maintained by the promotion workflow.",
+            ].join("\n");
+
+            const openPulls = await github.rest.pulls.list({
+              owner,
+              repo,
+              state: "open",
+              base: "main",
+              head: `${owner}:dev`,
+              per_page: 1,
+            });
+
+            const finalDev = await github.rest.git.getRef({
+              owner,
+              repo,
+              ref: "heads/dev",
+            });
+            if (finalDev.data.object.sha !== devSha) {
+              core.notice(
+                `dev advanced from ${devSha} to ${finalDev.data.object.sha} during promotion; waiting for the newer CI run.`,
+              );
+              return;
+            }
+
+            let pull;
+            if (openPulls.data.length === 0) {
+              const created = await github.rest.pulls.create({
+                owner,
+                repo,
+                base: "main",
+                head: "dev",
+                title: "Promote dev to main",
+                body,
+                maintainer_can_modify: true,
+              });
+              pull = created.data;
+              core.info(`Created pull request #${pull.number}.`);
+            } else {
+              pull = openPulls.data[0];
+              const updated = await github.rest.pulls.update({
+                owner,
+                repo,
+                pull_number: pull.number,
+                title: "Promote dev to main",
+                body,
+              });
+              pull = updated.data;
+              core.info(`Updated pull request #${pull.number}.`);
+            }
+            core.info(`Pull request #${pull.number} remains subject to normal merge controls.`);
+
+  notify-root:
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      ROOT_TOKEN: ${{ secrets.PROSODYAI_ROOT_DISPATCH_TOKEN }}
+      MAIN_SHA: ${{ github.event.workflow_run.head_sha }}
+      CI_RUN_ID: ${{ github.event.workflow_run.id }}
+      CI_RUN_URL: ${{ github.event.workflow_run.html_url }}
+
+    steps:
+      - name: Use polling fallback when no dispatch token is configured
+        if: env.ROOT_TOKEN == ''
+        run: echo "::notice::Root dispatch token is not configured; root polling remains active."
+
+      - name: Notify the root repository of the green main SHA
+        if: env.ROOT_TOKEN != ''
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
+        with:
+          github-token: ${{ secrets.PROSODYAI_ROOT_DISPATCH_TOKEN }}
+          script: |
+            const sha = process.env.MAIN_SHA;
+            if (!/^[0-9a-f]{40}$/.test(sha)) {
+              core.setFailed(`Invalid main SHA: ${sha}`);
+              return;
+            }
+
+            await github.rest.repos.createDispatchEvent({
+              owner: "ProsodyAI",
+              repo: "prosodyai",
+              event_type: "prosodyai_langchain_main_updated",
+              client_payload: {
+                component: "langchain",
+                gitlink_path: "packages/langchain",
+                repository: "ProsodyAI/langchain",
+                sha,
+                branch: "main",
+                ci_run_id: process.env.CI_RUN_ID,
+                ci_run_url: process.env.CI_RUN_URL,
+              },
+            });
+            core.info(`Notified ProsodyAI/prosodyai of green main SHA ${sha}.`);
