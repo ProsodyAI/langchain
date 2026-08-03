@@ -1,131 +1,151 @@
 # prosodyai-langchain
 
-ProsodyAI integration for LangChain. Includes speech emotion analysis, forward-looking conversation predictions, and feedback for continuous model improvement.
+ProsodyAI for LangChain turns a recording into a transcript, diarized turns, and measured
+speech delivery. It exposes what happened in the audio: recording-local speakers, ordered
+acoustic windows, window-level vocal features, and movement against each speaker's own
+previous window.
 
-## Installation
+The integration does not treat recording-local speaker labels as durable identity. A label
+such as `speaker_0` only identifies one speaker within that recording.
+
+## Install
+
+The package is not yet published to PyPI. Install the current public repository directly:
 
 ```bash
-pip install prosodyai-langchain
+python -m pip install \
+  "prosodyai-langchain @ git+https://github.com/ProsodyAI/langchain.git@main"
 ```
 
-## Usage
+Set your API key in the environment:
 
-### As a LangChain Tool
+```bash
+export PROSODY_API_KEY="your-api-key"
+```
+
+## LangChain tool
+
+The tool only reads audio inside an application-owned directory that you configure. Give the
+agent a path relative to that directory, not an unrestricted filesystem path.
 
 ```python
+import os
+from pathlib import Path
+
 from prosodyai_langchain import ProsodyTool
 
-tool = ProsodyTool(api_key="your-api-key")
+tool = ProsodyTool(
+    api_key=os.environ["PROSODY_API_KEY"],
+    allowed_audio_root=Path("./recordings"),
+)
 
-# Use with an agent
-result = tool.invoke({"audio_path": "./audio.wav"})
+result = tool.invoke({"audio_path": "support-call.wav", "language": "en"})
 print(result)
 ```
 
-### Conversation Tracking with Forward Predictions
+The formatted result includes:
 
-Track a conversation across multiple utterances to get forward-looking predictions -- escalation risk, CSAT forecast, churn risk, and recommended agent tone.
+- The transcript and duration.
+- Recording-local speakers and diarized turns.
+- The first measured acoustic window for each speaker.
+- The largest notable level or pitch movement against that same speaker's previous window.
+- Checkpoint-gated affect values only when the response explicitly sets
+  `affect_available=true`.
 
-```python
-from prosodyai_langchain import ProsodyTool
+Supported file extensions are `.wav`, `.mp3`, `.m4a`, `.flac`, and `.ogg`. The default file
+size limit is 50 MiB and can be lowered with `max_audio_bytes`.
 
-# Set session_id to track conversation state
-tool = ProsodyTool(
-    api_key="your-api-key",
-    vertical="contact_center",
-    session_id="call-12345",
-)
+## Direct client
 
-# Each invocation builds on the conversation history
-result = tool.invoke({"audio_path": "./segment_1.wav"})
-# Output includes:
-# Forward Predictions (based on 1 utterances):
-# - Escalation Risk: 12%
-# - Predicted Final CSAT: 3.8/5
-# - Recommended Tone: professional
-
-result = tool.invoke({"audio_path": "./segment_2.wav"})
-# Predictions sharpen with more context:
-# Forward Predictions (based on 2 utterances):
-# - Escalation Risk: 45%
-# - Predicted Final CSAT: 2.6/5
-# - Recommended Tone: empathetic
-#
-# WARNING: High escalation risk...
-```
-
-### Direct Client Usage
+Use `ProsodyClient` when your application needs the response objects instead of tool-formatted
+text.
 
 ```python
+import os
+from pathlib import Path
+
 from prosodyai_langchain import ProsodyClient
 
-client = ProsodyClient(api_key="your-api-key")
+with ProsodyClient(api_key=os.environ["PROSODY_API_KEY"]) as client:
+    analysis = client.analyze(
+        Path("./recordings/support-call.wav"),
+        language="en",
+        session_id="call-12345",
+        diarize=True,
+    )
 
-# Analyze audio with session tracking
-result = client.analyze(
-    "./audio.wav",
-    vertical="contact_center",
-    session_id="call-12345",
-)
-print(result["emotion"])               # {'primary': 'frustrated', ...}
-print(result["prediction_id"])         # 'pred-abc123'
-print(result["forward_predictions"])   # {'will_escalate': 0.73, ...}
+print(analysis["text"])
 
-# Extract features only
-features = client.extract_features("./audio.wav")
-print(features["f0_mean"])
+for turn in analysis.get("turns") or []:
+    print(turn["speaker_id"], turn["start_ms"], turn["end_ms"], turn["text"])
+
+for window in analysis.get("prosody_timeline") or []:
+    state = window.get("acoustic_state")
+    change = window.get("acoustic_change")
+    if state:
+        print(window["speaker_id"], state["values"])
+    if change:
+        print(change["reference"], change["values"])
 ```
 
-### Feedback for Continuous Improvement
+### Acoustic state
 
-Submit real-world outcomes to improve model predictions over time.
+Each item in `prosody_timeline` is an ordered model window. Its `acoustic_state.values` can
+contain physical and waveform-derived measurements such as:
+
+- `rms_dbfs` and `peak_dbfs`
+- `f0_median_hz`, `f0_range_semitones`, and `f0_slope_semitones_per_second`
+- `spectral_tilt_db_per_octave`
+- `voiced_ratio`, `pause_ratio`, `clipping_ratio`, and `voice_onset_rate_hz`
+
+Unavailable measurements are `null`, not zero. Use `acoustic_state.masks` to distinguish a
+missing measurement from a real zero value.
+
+The underlying acoustic state schema can also carry `frames` at the Mimi frame rate, currently
+12.5 Hz. Those arrays provide within-window level, pitch, spectral tilt, voicing, and voice
+activity trajectories. Batch reports intentionally omit frame arrays and return the window
+summaries needed by this integration. If a compatible endpoint includes frames, the client
+preserves them unchanged.
+
+### Same-speaker acoustic change
+
+`acoustic_change.values` contains signed deltas such as `rms_db_change` and
+`f0_median_semitone_change`. The `reference` field defines what the delta is measured against.
+For the conversation timeline, the reference is the previous analyzed window for the same
+recording-local speaker. The first window for a speaker normally has no delta.
+
+## Feedback contracts
+
+Corrections use the current VAD correction fields:
 
 ```python
-from prosodyai_langchain import ProsodyClient
-
-client = ProsodyClient(api_key="your-api-key")
-
-# Correct a wrong prediction
-client.submit_correction(
-    prediction_id="pred-abc123",
-    correct_emotion="angry",
-)
-
-# Submit conversation outcome (trains forward predictions)
-client.submit_session_outcome(
-    session_id="call-12345",
-    vertical="contact_center",
-    actual_csat=2.0,
-    escalated=True,
-    first_call_resolved=False,
-)
-
-# Submit per-prediction outcome
-client.submit_outcome(
-    prediction_id="pred-abc123",
-    vertical="contact_center",
-    actual_csat=2.0,
-)
+with ProsodyClient(api_key=os.environ["PROSODY_API_KEY"]) as client:
+    client.submit_correction(
+        prediction_id="pred-123",
+        corrected_valence=-0.2,
+        corrected_arousal=0.7,
+        notes="Reviewed by a human evaluator",
+    )
 ```
 
-### With LangChain Agents
+Session outcomes use the KPI identifiers configured for the authenticated tenant:
 
 ```python
-from langchain.agents import AgentExecutor, create_openai_tools_agent
-from langchain_openai import ChatOpenAI
-from prosodyai_langchain import ProsodyTool
-
-llm = ChatOpenAI(model="gpt-4")
-tool = ProsodyTool(
-    api_key="your-api-key",
-    vertical="contact_center",
-    session_id="call-12345",
-)
-
-agent = create_openai_tools_agent(llm, [tool], prompt)
-executor = AgentExecutor(agent=agent, tools=[tool])
-
-response = executor.invoke({
-    "input": "Analyze the emotion in this audio: ./customer_call.wav"
-})
+with ProsodyClient(api_key=os.environ["PROSODY_API_KEY"]) as client:
+    client.submit_session_outcome(
+        session_id="call-12345",
+        outcomes=[
+            {"kpi_id": "first_call_resolved", "boolean_value": True},
+            {"kpi_id": "resolution_quality", "scalar_value": 4.0},
+        ],
+        notes="Imported from the post-call system of record",
+    )
 ```
+
+## Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local test and release checks.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

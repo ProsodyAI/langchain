@@ -1,30 +1,58 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [project]
 name = "prosodyai-langchain"
-version = "0.1.0"
-description = "ProsodyAI integration for LangChain"
+version = "0.2.0"
+description = "LangChain integration for ProsodyAI transcripts, speaker turns, and measured acoustics"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "ProsodyAI" }]
-keywords = ["prosody", "emotion", "langchain", "ai", "nlp"]
+keywords = ["acoustics", "audio", "diarization", "langchain", "prosody", "speech"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "langchain-core>=0.2.0",
-    "httpx>=0.25.0",
+    "httpx>=0.25,<1",
+    "langchain-core>=0.3,<2",
+    "pydantic>=2.7,<3",
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio"]
+dev = [
+    "build>=1.2,<2",
+    "pytest>=8,<9",
+    "ruff>=0.8,<1",
+    "twine>=5,<7",
+]
 
 [project.urls]
-Homepage = "https://github.com/ProsodyAI/langchain"
+Homepage = "https://prosodyai.app"
+Documentation = "https://prosodyai.app/docs"
 Repository = "https://github.com/ProsodyAI/langchain"
+Issues = "https://github.com/ProsodyAI/langchain/issues"
+
+[tool.hatch.build.targets.wheel]
+packages = ["prosodyai_langchain"]
+
+[tool.pytest.ini_options]
+addopts = "-ra"
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["B", "E", "F", "I", "UP"]
