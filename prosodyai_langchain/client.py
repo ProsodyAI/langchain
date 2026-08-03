@@ -31,29 +31,36 @@ class ProsodyClient:
         language: str = "en",
         vertical: Optional[str] = None,
         session_id: Optional[str] = None,
+        diarize: bool = True,
     ) -> dict:
         """
-        Analyze audio for emotion.
+        Analyze audio: transcript, speaker turns, and measured prosody.
 
         Args:
             audio: Audio bytes or file path
             language: Language code
             vertical: Optional vertical for domain-specific analysis
-            session_id: Optional session ID for conversation tracking.
-                When provided, enables forward-looking predictions
-                (escalation risk, CSAT forecast, churn risk, etc.)
-                across multiple utterances in the same conversation.
+            session_id: Optional session ID for conversation tracking
+            diarize: Request speaker turns, the prosody timeline, and
+                per-speaker rollups. Without it the response carries no
+                ``turns`` / ``prosody_timeline``, so no acoustic measurement
+                reaches the caller.
 
         Returns:
-            Analysis result with emotion, confidence, VAD scores,
-            and forward_predictions (if session_id provided).
+            Analysis result. The measurements are ``acoustic_state`` (measured
+            waveform values) and ``acoustic_change`` (movement against the same
+            speaker's previous window) on each ``turns[]`` entry and each
+            ``prosody_timeline[]`` window.
         """
         if isinstance(audio, str):
             with open(audio, "rb") as f:
                 audio = f.read()
 
         files = {"file": ("audio.wav", audio, "audio/wav")}
-        data: dict[str, str] = {"language": language}
+        data: dict[str, str] = {
+            "language": language,
+            "diarize": "true" if diarize else "false",
+        }
         if vertical:
             data["vertical"] = vertical
         if session_id:

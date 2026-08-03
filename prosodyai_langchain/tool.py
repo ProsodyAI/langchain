@@ -1,11 +1,17 @@
-"""LangChain tool for ProsodyAI with conversation tracking and forward predictions."""
+"""LangChain tool for ProsodyAI: transcript, speaker turns, measured delivery."""
 
-from typing import Optional, Type
-from langchain_core.tools import BaseTool
+from typing import Any, Optional, Type
+
 from langchain_core.callbacks import CallbackManagerForToolRun
+from langchain_core.tools import BaseTool
 from pydantic import BaseModel, Field
 
 from prosodyai_langchain.client import ProsodyClient
+
+# Movement large enough to be worth naming to an LLM. Below this the change is
+# within the range a speaker covers without doing anything different.
+_NOTABLE_DB = 3.0
+_NOTABLE_SEMITONES = 2.0
 
 
 class ProsodyToolInput(BaseModel):
@@ -15,26 +21,70 @@ class ProsodyToolInput(BaseModel):
     language: str = Field(default="en", description="Language code (e.g., 'en', 'es')")
 
 
+def _fmt(value: Any, digits: int = 2, suffix: str = "") -> str:
+    if not isinstance(value, (int, float)):
+        return "not measurable"
+    return f"{value:.{digits}f}{suffix}"
+
+
+def _describe_window(state: dict) -> str:
+    values = (state or {}).get("values") or {}
+    parts = [
+        f"level {_fmt(values.get('rms_dbfs'), 1, ' dBFS')}",
+        f"pitch {_fmt(values.get('f0_median_hz'), 0, ' Hz')}",
+        f"pitch range {_fmt(values.get('f0_range_semitones'), 1, ' semitones')}",
+        f"voiced {_fmt(values.get('voiced_ratio'))}",
+        f"pause {_fmt(values.get('pause_ratio'))}",
+    ]
+    return ", ".join(parts)
+
+
+def _largest_movement(timeline: list[dict]) -> Optional[str]:
+    """The biggest speaker-relative shift on the call, if any is notable."""
+    best: Optional[tuple[float, str]] = None
+    for point in timeline:
+        values = ((point or {}).get("acoustic_change") or {}).get("values") or {}
+        for key, threshold, unit in (
+            ("rms_db_change", _NOTABLE_DB, "dB"),
+            ("f0_median_semitone_change", _NOTABLE_SEMITONES, "semitones"),
+        ):
+            value = values.get(key)
+            if not isinstance(value, (int, float)):
+                continue
+            if abs(value) < threshold:
+                continue
+            if best is None or abs(value) > best[0]:
+                at_ms = int(point.get("start_ms") or 0)
+                speaker = point.get("speaker_id") or "unknown"
+                label = "louder" if key == "rms_db_change" else "higher"
+                if value < 0:
+                    label = "quieter" if key == "rms_db_change" else "lower"
+                best = (
+                    abs(value),
+                    f"{speaker} went {label} by {abs(value):.1f} {unit} "
+                    f"at {at_ms // 1000}s versus their previous window",
+                )
+    return best[1] if best else None
+
+
 class ProsodyTool(BaseTool):
     """
-    LangChain tool for speech emotion analysis with forward-looking predictions.
+    LangChain tool for measured speech delivery.
 
-    Analyzes audio files to detect emotion, sentiment, and prosodic features.
-    When session_id is set, tracks conversation state across multiple calls
-    and provides forward-looking predictions (escalation risk, CSAT forecast,
-    churn risk, recommended agent tone).
-
-    Use this when you need to understand the emotional content of speech
-    and predict conversation outcomes.
+    Returns what the audio measured — level in dBFS, pitch in Hz, pitch range
+    and movement in semitones, voiced and pause ratios — per speaker, alongside
+    the transcript. These are physical quantities, not inferred emotion labels:
+    deciding that a rise in level and pitch means a caller is escalating is the
+    caller's policy to set on top of numbers that can be checked.
     """
 
-    name: str = "prosody_emotion_analyzer"
+    name: str = "prosody_delivery_analyzer"
     description: str = (
-        "Analyzes speech audio to detect emotion, sentiment, and predict "
-        "conversation outcomes. Input should be a path to an audio file. "
-        "Returns emotion label, confidence, valence/arousal/dominance scores, "
-        "and forward-looking predictions (escalation risk, CSAT forecast, "
-        "recommended agent tone) when tracking a conversation session."
+        "Analyzes speech audio and returns the transcript, speaker turns, and "
+        "measured delivery per speaker: loudness in dBFS, pitch in Hz, pitch "
+        "range in semitones, voiced and pause ratios, plus how far each "
+        "speaker moved from their own previous delivery. Input should be a "
+        "path to an audio file. Returns measurements, not emotion labels."
     )
     args_schema: Type[BaseModel] = ProsodyToolInput
 
@@ -49,7 +99,7 @@ class ProsodyTool(BaseTool):
         language: str = "en",
         run_manager: Optional[CallbackManagerForToolRun] = None,
     ) -> str:
-        """Analyze audio file for emotion and predict conversation outcomes."""
+        """Analyze an audio file and report what it measured."""
         client = ProsodyClient(api_key=self.api_key, base_url=self.base_url)
 
         try:
@@ -60,85 +110,71 @@ class ProsodyTool(BaseTool):
                 session_id=self.session_id,
             )
 
-            # Format for LLM consumption
-            emotion_data = result.get("emotion", {})
-            emotion = (
-                emotion_data.get("primary", "unknown")
-                if isinstance(emotion_data, dict)
-                else emotion_data
-            )
-            confidence = (
-                emotion_data.get("confidence", 0)
-                if isinstance(emotion_data, dict)
-                else 0
-            )
+            lines = [
+                "Speech Analysis:",
+                f"- Transcript: \"{result.get('text', '')}\"",
+                f"- Duration: {_fmt(result.get('duration'), 1, 's')}",
+            ]
 
-            output = f"""Speech Analysis:
-- Transcription: "{result.get('text', '')}"
-- Emotion: {emotion} (confidence: {confidence:.0%})
-- Valence: {result.get('valence', 0):+.2f} (negative to positive)
-- Arousal: {result.get('arousal', 0):.2f} (calm to excited)
-- Dominance: {result.get('dominance', 0):.2f} (submissive to dominant)"""
+            diarization = result.get("diarization") or {}
+            speakers = diarization.get("speakers") or []
+            if speakers:
+                lines.append(f"- Speakers: {len(speakers)} ({', '.join(map(str, speakers))})")
 
-            # Add forward predictions if available
-            fwd = result.get("forward_predictions")
-            if fwd:
-                escalation = fwd.get("will_escalate", 0)
-                onset = fwd.get("escalation_onset", 0)
-                csat = fwd.get("final_csat_predicted", 3.0)
-                churn = fwd.get("churn_risk", 0)
-                resolution = fwd.get("resolution_probability", 0.5)
-                tone = fwd.get("recommended_tone", "professional")
-                sentiment = fwd.get("sentiment_forecast", 0)
-                pred_confidence = fwd.get("prediction_confidence", 0)
-                utterances = fwd.get("utterances_seen", 0)
+            timeline = [
+                point
+                for point in (result.get("prosody_timeline") or [])
+                if isinstance(point, dict)
+            ]
+            measured = [point for point in timeline if point.get("acoustic_state")]
 
-                output += f"""
+            if measured:
+                lines.append(f"- Measured windows: {len(measured)}")
+                lines.append("")
+                lines.append("Measured delivery (first window per speaker):")
+                seen: set[str] = set()
+                for point in measured:
+                    speaker = str(point.get("speaker_id") or "unknown")
+                    if speaker in seen:
+                        continue
+                    seen.add(speaker)
+                    lines.append(f"- {speaker}: {_describe_window(point['acoustic_state'])}")
 
-Forward Predictions (based on {utterances} utterances):
-- Escalation Risk: {escalation:.0%}"""
+                movement = _largest_movement(measured)
+                if movement:
+                    lines.append("")
+                    lines.append(f"Largest delivery shift: {movement}.")
+            else:
+                lines.append(
+                    "- No acoustic measurements in this response "
+                    "(request diarize=true to receive them)."
+                )
 
-                if onset > 0.3:
-                    output += f" [ONSET DETECTED: {onset:.0%}]"
+            turns = result.get("turns") or []
+            if turns:
+                lines.append("")
+                lines.append(f"Turns: {len(turns)}")
+                for turn in turns[:5]:
+                    start = int(turn.get("start_ms") or 0) // 1000
+                    text = str(turn.get("text") or "")[:80]
+                    lines.append(f"- [{start}s] {turn.get('speaker_id', 'unknown')}: {text}")
 
-                output += f"""
-- Predicted Final CSAT: {csat:.1f}/5
-- Churn Risk: {churn:.0%}
-- Resolution Probability: {resolution:.0%}
-- Sentiment Forecast: {sentiment:+.2f}
-- Recommended Tone: {tone}
-- Prediction Confidence: {pred_confidence:.0%}"""
+            if result.get("affect_available"):
+                prosody = result.get("prosody") or {}
+                lines.append("")
+                lines.append(
+                    "Affect (checkpoint-gated): "
+                    f"valence {_fmt(prosody.get('valence'))}, "
+                    f"arousal {_fmt(prosody.get('arousal'))}, "
+                    f"dominance {_fmt(prosody.get('dominance'))}"
+                )
 
-                # Add urgent warnings for high-risk situations
-                if escalation > 0.6:
-                    output += (
-                        "\n\nWARNING: High escalation risk. "
-                        "Recommend de-escalation: acknowledge frustration, "
-                        "apologize, focus on resolution."
-                    )
-                if onset > 0.5:
-                    output += (
-                        "\n\nALERT: Escalation onset detected NOW. "
-                        "Immediate tone shift recommended."
-                    )
-
-            # Add vertical analysis if available
-            va = result.get("vertical_analysis")
-            if va:
-                output += f"""
-
-Vertical Analysis ({va.get('vertical', '')}):
-- State: {va.get('state', 'unknown')}"""
-                metrics = va.get("metrics", {})
-                for key, value in metrics.items():
-                    output += f"\n- {key}: {value}"
-
-            # Store prediction_id for feedback
             prediction_id = result.get("prediction_id", "")
             if prediction_id:
-                output += f"\n\n[prediction_id: {prediction_id}]"
+                lines.append("")
+                lines.append(f"[prediction_id: {prediction_id}]")
 
-            return output
+            return "\n".join(lines)
 
         except Exception as e:
             return f"Error analyzing audio: {str(e)}"
