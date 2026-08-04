@@ -1,7 +1,5 @@
-"""ProsodyAI LangChain integration."""
+"""Compatibility imports for the pre-release ProsodyAI LangChain namespace."""
 
-from prosodyai_langchain.client import ProsodyClient
-from prosodyai_langchain.tool import ProsodyTool
+from langchain_prosodyai import ProsodyAnalyzeAudioTool, ProsodyClient, ProsodyTool, __version__
 
-__all__ = ["ProsodyTool", "ProsodyClient"]
-__version__ = "0.2.0"
+__all__ = ["ProsodyAnalyzeAudioTool", "ProsodyClient", "ProsodyTool", "__version__"]

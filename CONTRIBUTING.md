@@ -23,7 +23,8 @@ python -m twine check dist/*
 ```
 
 Tests must not call the live ProsodyAI API. Use `httpx.MockTransport` for API contract tests and
-temporary directories for audio-path security tests. Never commit API keys or customer audio.
+temporary directories for audio-path security tests. The package also runs LangChain's pinned
+`ToolsUnitTests` contract. Never commit API keys or customer audio.
 
 Changes to the public client must remain aligned with the checked-in ProsodyAI OpenAPI contract.
 
@@ -34,7 +35,7 @@ A successful push CI run on `dev` creates or updates the `dev` to `main` pull re
 the secret is absent, it exits successfully and leaves promotion manual. Limit this token to
 `ProsodyAI/langchain` with read access to contents and write access to pull requests.
 
-Protect `main` with the four CI matrix checks as required checks. The promotion workflow only
+Protect `main` with the five CI matrix checks as required checks. The promotion workflow only
 maintains the pull request and must not be treated as an approval or merge boundary.
 
 A successful push CI run on `main` sends a `prosodyai_langchain_main_updated` repository
@@ -47,7 +48,7 @@ the gitlink.
 Publishing is deliberately separate from merging. To release:
 
 1. Update both `project.version` in `pyproject.toml` and `__version__` in
-   `prosodyai_langchain/__init__.py` on `dev`.
+   `langchain_prosodyai/__init__.py` on `dev`.
 2. Let the green promotion pull request merge that version into `main`.
 3. Create an explicit `vX.Y.Z` tag at the merged `main` commit and push the tag.
 4. Manually run the `Publish` workflow, provide that existing tag, and enable its confirmation.
