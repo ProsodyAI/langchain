@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing version tag on main, such as v0.2.1
+        description: Existing version tag on main, such as v0.3.0
         required: true
         type: string
       confirm_publish:
@@ -67,14 +67,14 @@ jobs:
 
           readme = Path("README.md").read_text(encoding="utf-8")
           readme_lower = readme.lower()
-          if "pip install prosodyai-langchain" not in readme_lower:
+          if "pip install langchain-prosodyai" not in readme_lower:
               raise SystemExit(
-                  "README.md must document `pip install prosodyai-langchain` before publishing."
+                  "README.md must document `pip install langchain-prosodyai` before publishing."
               )
           stale_install_text = (
               "not yet published to pypi",
               "not published to pypi",
-              "prosodyai-langchain @ git+",
+              "langchain-prosodyai @ git+",
               "git+https://github.com/prosodyai/langchain",
           )
           stale_marker = next(
@@ -134,7 +134,7 @@ jobs:
           import os
           from importlib.metadata import version
 
-          installed = version("prosodyai-langchain")
+          installed = version("langchain-prosodyai")
           if installed != os.environ["EXPECTED_VERSION"]:
               raise SystemExit(
                   f"Installed version {installed!r} does not match the release version."
@@ -163,7 +163,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: pypi
-      url: https://pypi.org/project/prosodyai-langchain/
+      url: https://pypi.org/project/langchain-prosodyai/
     permissions:
       contents: read
       id-token: write

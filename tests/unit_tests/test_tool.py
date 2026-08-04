@@ -5,10 +5,11 @@ from typing import Any
 
 import httpx
 import pytest
+from langchain_core.messages import ToolMessage
 from langchain_core.tools import ToolException
 
-import prosodyai_langchain.tool as tool_module
-from prosodyai_langchain import ProsodyTool
+import langchain_prosodyai.tool as tool_module
+from langchain_prosodyai import ProsodyAnalyzeAudioTool
 
 
 def _analysis_fixture() -> dict[str, Any]:
@@ -85,7 +86,7 @@ def _install_fake_client(monkeypatch: pytest.MonkeyPatch, result: dict[str, Any]
     monkeypatch.setattr(tool_module, "ProsodyClient", FakeProsodyClient)
 
 
-def test_tool_formats_speakers_windows_frames_and_same_speaker_change(
+def test_tool_preserves_the_complete_structured_response(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -94,29 +95,55 @@ def test_tool_formats_speakers_windows_frames_and_same_speaker_change(
     (audio_root / "call.wav").write_bytes(b"audio")
     _install_fake_client(monkeypatch, _analysis_fixture())
 
-    tool = ProsodyTool(
+    tool = ProsodyAnalyzeAudioTool(
         api_key="super-secret-key",
         allowed_audio_root=audio_root,
     )
     output = tool.invoke({"audio_path": "call.wav", "language": "en"})
 
-    assert 'Transcript: "Hello there"' in output
-    assert "Recording-local speakers: 2 (speaker_0, speaker_1)" in output
-    assert "Measured windows: 2" in output
-    assert "level -21.5 dBFS" in output
-    assert "pitch 180 Hz" in output
-    assert "2 frames at 12.5 Hz" in output
-    assert "speaker_0 went louder by 4.2 dB" in output
-    assert "versus their own previous window" in output
-    assert "Turns: 1" in output
-    assert "Checkpoint-gated affect" not in output
-    assert "valence" not in output
+    assert output == _analysis_fixture()
+    assert output["diarization"]["speakers"] == ["speaker_0", "speaker_1"]
+    assert output["prosody_timeline"][0]["acoustic_state"]["frames"]["f0_hz"] == [
+        175.0,
+        185.0,
+    ]
+    assert output["prosody_timeline"][1]["acoustic_change"]["values"] == {"rms_db_change": 4.2}
+    assert output["prosody"]["valence"] == 0.9
+
+
+def test_tool_call_returns_a_tool_message_with_the_structured_result(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    audio_root = tmp_path / "recordings"
+    audio_root.mkdir()
+    (audio_root / "call.wav").write_bytes(b"audio")
+    _install_fake_client(monkeypatch, _analysis_fixture())
+    tool = ProsodyAnalyzeAudioTool(
+        api_key="super-secret-key",
+        allowed_audio_root=audio_root,
+    )
+
+    message = tool.invoke(
+        {
+            "name": tool.name,
+            "args": {"audio_path": "call.wav", "language": "en"},
+            "id": "call_01",
+            "type": "tool_call",
+        }
+    )
+
+    assert isinstance(message, ToolMessage)
+    assert message.name == "prosody_analyze_audio"
+    assert message.tool_call_id == "call_01"
+    assert "prosody_timeline" in message.content
+    assert "rms_db_change" in message.content
 
 
 def test_api_key_is_redacted_from_repr_and_dump(tmp_path: Path) -> None:
     audio_root = tmp_path / "recordings"
     audio_root.mkdir()
-    tool = ProsodyTool(
+    tool = ProsodyAnalyzeAudioTool(
         api_key="super-secret-key",
         allowed_audio_root=audio_root,
     )
@@ -130,7 +157,7 @@ def test_tool_rejects_path_escape(tmp_path: Path) -> None:
     audio_root = tmp_path / "recordings"
     audio_root.mkdir()
     (tmp_path / "outside.wav").write_bytes(b"audio")
-    tool = ProsodyTool(api_key="super-secret-key", allowed_audio_root=audio_root)
+    tool = ProsodyAnalyzeAudioTool(api_key="super-secret-key", allowed_audio_root=audio_root)
 
     with pytest.raises(ToolException, match="outside the allowed audio root"):
         tool.invoke({"audio_path": "../outside.wav"})
@@ -140,7 +167,7 @@ def test_tool_rejects_unsupported_extension(tmp_path: Path) -> None:
     audio_root = tmp_path / "recordings"
     audio_root.mkdir()
     (audio_root / "notes.txt").write_text("not audio")
-    tool = ProsodyTool(api_key="super-secret-key", allowed_audio_root=audio_root)
+    tool = ProsodyAnalyzeAudioTool(api_key="super-secret-key", allowed_audio_root=audio_root)
 
     with pytest.raises(ToolException, match="Unsupported audio type"):
         tool.invoke({"audio_path": "notes.txt"})
@@ -150,7 +177,7 @@ def test_tool_rejects_file_over_size_limit(tmp_path: Path) -> None:
     audio_root = tmp_path / "recordings"
     audio_root.mkdir()
     (audio_root / "call.wav").write_bytes(b"12345")
-    tool = ProsodyTool(
+    tool = ProsodyAnalyzeAudioTool(
         api_key="super-secret-key",
         allowed_audio_root=audio_root,
         max_audio_bytes=4,
@@ -180,7 +207,7 @@ def test_tool_sanitizes_transport_errors(
             return None
 
     monkeypatch.setattr(tool_module, "ProsodyClient", FailingProsodyClient)
-    tool = ProsodyTool(api_key="super-secret-key", allowed_audio_root=audio_root)
+    tool = ProsodyAnalyzeAudioTool(api_key="super-secret-key", allowed_audio_root=audio_root)
 
     with pytest.raises(ToolException) as exc_info:
         tool.invoke({"audio_path": "call.wav"})

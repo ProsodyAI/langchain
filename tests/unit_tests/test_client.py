@@ -6,7 +6,7 @@ from pathlib import Path
 import httpx
 import pytest
 
-from prosodyai_langchain import ProsodyClient
+from langchain_prosodyai import ProsodyClient
 
 
 def test_analyze_uses_current_multipart_contract(tmp_path: Path) -> None:
