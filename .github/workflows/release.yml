@@ -65,6 +65,15 @@ jobs:
           with Path("pyproject.toml").open("rb") as project_file:
               version = tomllib.load(project_file)["project"]["version"]
 
+          version_source = Path("langchain_prosodyai/__init__.py").read_text(
+              encoding="utf-8"
+          )
+          expected_assignment = f'__version__ = "{version}"'
+          if expected_assignment not in version_source:
+              raise SystemExit(
+                  "langchain_prosodyai.__version__ does not match project.version."
+              )
+
           readme = Path("README.md").read_text(encoding="utf-8")
           readme_lower = readme.lower()
           if "pip install langchain-prosodyai" not in readme_lower:
@@ -134,10 +143,16 @@ jobs:
           import os
           from importlib.metadata import version
 
+          from langchain_prosodyai import __version__
+
           installed = version("langchain-prosodyai")
           if installed != os.environ["EXPECTED_VERSION"]:
               raise SystemExit(
                   f"Installed version {installed!r} does not match the release version."
+              )
+          if __version__ != installed:
+              raise SystemExit(
+                  f"Package version {__version__!r} does not match installed metadata {installed!r}."
               )
           PY
 

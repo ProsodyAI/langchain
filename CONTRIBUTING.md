@@ -35,7 +35,7 @@ A successful push CI run on `dev` creates or updates the `dev` to `main` pull re
 the secret is absent, it exits successfully and leaves promotion manual. Limit this token to
 `ProsodyAI/langchain` with read access to contents and write access to pull requests.
 
-Protect `main` with the four CI matrix checks as required checks. The promotion workflow only
+Protect `main` with the five CI matrix checks as required checks. The promotion workflow only
 maintains the pull request and must not be treated as an approval or merge boundary.
 
 A successful push CI run on `main` sends a `prosodyai_langchain_main_updated` repository
