@@ -32,11 +32,7 @@ def _analysis_fixture() -> dict[str, Any]:
                         "voiced_ratio": 0.8,
                         "pause_ratio": 0.2,
                     },
-                    "frames": {
-                        "frame_rate_hz": 12.5,
-                        "rms_dbfs": [-22.0, -21.0],
-                        "f0_hz": [175.0, 185.0],
-                    },
+                    "masks": {"f0_available": True},
                 },
             },
             {
@@ -103,10 +99,8 @@ def test_tool_preserves_the_complete_structured_response(
 
     assert output == _analysis_fixture()
     assert output["diarization"]["speakers"] == ["speaker_0", "speaker_1"]
-    assert output["prosody_timeline"][0]["acoustic_state"]["frames"]["f0_hz"] == [
-        175.0,
-        185.0,
-    ]
+    assert output["prosody_timeline"][0]["acoustic_state"]["values"]["f0_median_hz"] == 180.0
+    assert output["prosody_timeline"][0]["acoustic_state"]["masks"]["f0_available"] is True
     assert output["prosody_timeline"][1]["acoustic_change"]["values"] == {"rms_db_change": 4.2}
     assert output["prosody"]["valence"] == 0.9
 

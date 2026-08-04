@@ -70,7 +70,7 @@ for window in analysis.get("prosody_timeline") or []:
     state = window.get("acoustic_state")
     change = window.get("acoustic_change")
     if state:
-        print(window["speaker_id"], state["values"], state.get("frames"))
+        print(window["speaker_id"], state["values"])
     if change:
         print(change["reference"], change["values"])
 ```
@@ -131,7 +131,6 @@ The recorded-audio response can include:
 - `prosody_timeline` with ordered `acoustic_state` and `acoustic_change`
 - summary measurements such as RMS and peak level, pitch, spectral tilt, voicing, pauses,
   clipping, and voice-onset rate
-- frame-level acoustic trajectories at the rate returned by the API
 
 Unavailable acoustic measurements are `null`, not zero. Use `acoustic_state.masks` to distinguish
 a missing measurement from a measured zero.
