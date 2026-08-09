@@ -61,9 +61,7 @@ class ProsodyClient:
             content = audio
             filename = "audio.wav"
         else:
-            raise TypeError(
-                f"audio must be bytes, str, or Path; got {type(audio).__name__}"
-            )
+            raise TypeError(f"audio must be bytes, str, or Path; got {type(audio).__name__}")
 
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         return filename, content, content_type
@@ -196,9 +194,7 @@ class ProsodyClient:
         normalized: list[dict[str, Any]] = []
         for outcome in outcomes:
             if not isinstance(outcome, Mapping):
-                raise TypeError(
-                    f"Each outcome must be a mapping; got {type(outcome).__name__}"
-                )
+                raise TypeError(f"Each outcome must be a mapping; got {type(outcome).__name__}")
             unknown = set(outcome) - _OUTCOME_FIELDS
             if unknown:
                 names = ", ".join(sorted(unknown))
@@ -209,9 +205,7 @@ class ProsodyClient:
 
             kpi_id = outcome.get("kpi_id")
             if not isinstance(kpi_id, str) or not kpi_id.strip():
-                raise ValueError(
-                    f"Each outcome requires a non-empty kpi_id string; got {kpi_id!r}"
-                )
+                raise ValueError(f"Each outcome requires a non-empty kpi_id string; got {kpi_id!r}")
 
             entry = {key: value for key, value in outcome.items() if key in _OUTCOME_FIELDS}
             entry["kpi_id"] = kpi_id.strip()
