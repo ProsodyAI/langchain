@@ -46,7 +46,10 @@ class ProsodyAnalyzeAudioTool(BaseTool):
         try:
             root = self.allowed_audio_root.expanduser().resolve(strict=True)
         except OSError:
-            raise ToolException("The configured audio root is unavailable.") from None
+            raise ToolException(
+                "The configured audio root does not resolve to an existing directory; "
+                "fix allowed_audio_root where the tool is constructed."
+            ) from None
 
         candidate = Path(audio_path).expanduser()
         if not candidate.is_absolute():
@@ -55,22 +58,41 @@ class ProsodyAnalyzeAudioTool(BaseTool):
         try:
             resolved = candidate.resolve(strict=True)
         except OSError:
-            raise ToolException("The requested audio file was not found.") from None
+            raise ToolException(
+                f"No file exists at {audio_path!r} inside the audio root; pass the "
+                "relative path of an existing audio file."
+            ) from None
 
         if not resolved.is_relative_to(root):
-            raise ToolException("The requested audio file is outside the allowed audio root.")
+            raise ToolException(
+                f"The requested path {audio_path!r} resolves outside the allowed audio "
+                "root; pass a path inside the audio root."
+            )
         if not resolved.is_file():
-            raise ToolException("The requested audio path is not a file.")
+            raise ToolException(
+                f"The requested path {audio_path!r} does not point to a regular file; "
+                "pass the path of an audio file."
+            )
         if resolved.suffix.lower() not in _SUPPORTED_AUDIO_EXTENSIONS:
             supported = ", ".join(sorted(_SUPPORTED_AUDIO_EXTENSIONS))
-            raise ToolException(f"Unsupported audio type. Supported extensions: {supported}.")
+            raise ToolException(
+                f"Unsupported audio type {resolved.suffix.lower()!r}. "
+                f"Supported extensions: {supported}."
+            )
 
         try:
             size = resolved.stat().st_size
         except OSError:
-            raise ToolException("The requested audio file could not be inspected.") from None
+            raise ToolException(
+                f"The audio file at {audio_path!r} could not be inspected; check "
+                "filesystem permissions on the audio root."
+            ) from None
         if size > self.max_audio_bytes:
-            raise ToolException("The requested audio file exceeds the configured size limit.")
+            raise ToolException(
+                f"The audio file is {size} bytes, which exceeds the configured size "
+                f"limit of {self.max_audio_bytes} bytes; trim the recording or raise "
+                "max_audio_bytes."
+            )
         return resolved
 
     def _run(
@@ -99,10 +121,18 @@ class ProsodyAnalyzeAudioTool(BaseTool):
             raise
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
-            message = f"ProsodyAI rejected the analysis request with HTTP {status}."
+            message = (
+                f"ProsodyAI rejected the analysis request with HTTP {status}; check "
+                "the API key and the audio file, then retry."
+            )
             raise ToolException(message) from None
         except Exception:
-            raise ToolException("ProsodyAI could not analyze the requested audio file.") from None
+            # Deliberately opaque: transport errors can carry URLs and tokens,
+            # so none of the underlying detail reaches the calling agent.
+            raise ToolException(
+                "ProsodyAI could not analyze the requested audio file; verify the "
+                "configured base_url is reachable and retry."
+            ) from None
         finally:
             if client is not None:
                 client.close()

@@ -207,6 +207,9 @@ def test_tool_sanitizes_transport_errors(
         tool.invoke({"audio_path": "call.wav"})
 
     message = str(exc_info.value)
-    assert message == "ProsodyAI could not analyze the requested audio file."
+    assert message == (
+        "ProsodyAI could not analyze the requested audio file; verify the "
+        "configured base_url is reachable and retry."
+    )
     assert "private-value" not in message
     assert "internal.example" not in message

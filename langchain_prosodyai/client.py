@@ -32,9 +32,15 @@ class ProsodyClient:
         client: httpx.Client | None = None,
     ) -> None:
         if not api_key:
-            raise ValueError("api_key is required")
+            raise ValueError(
+                "ProsodyClient received an empty api_key; pass the API key for your "
+                "ProsodyAI organization"
+            )
         if client is not None and transport is not None:
-            raise ValueError("Pass either client or transport, not both")
+            raise ValueError(
+                "ProsodyClient received both client and transport; these are mutually "
+                "exclusive, so drop one of the two arguments"
+            )
 
         self._api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -55,7 +61,9 @@ class ProsodyClient:
             content = audio
             filename = "audio.wav"
         else:
-            raise TypeError("audio must be bytes or a filesystem path")
+            raise TypeError(
+                f"audio must be bytes, str, or Path; got {type(audio).__name__}"
+            )
 
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         return filename, content, content_type
@@ -128,7 +136,10 @@ class ProsodyClient:
                 notes,
             )
         ):
-            raise ValueError("At least one corrected value or note is required")
+            raise ValueError(
+                "At least one corrected value or note is required; submit_correction "
+                "received only None values, so pass a corrected_* value or notes"
+            )
 
         data: dict[str, Any] = {"prediction_id": prediction_id}
         for key, value in {
@@ -177,20 +188,30 @@ class ProsodyClient:
         outcomes: Sequence[Mapping[str, Any]],
     ) -> list[dict[str, Any]]:
         if not outcomes:
-            raise ValueError("outcomes must contain at least one KPI outcome")
+            raise ValueError(
+                "submit_session_outcome received an empty outcomes sequence; pass at "
+                "least one KPI outcome mapping"
+            )
 
         normalized: list[dict[str, Any]] = []
         for outcome in outcomes:
             if not isinstance(outcome, Mapping):
-                raise TypeError("Every outcome must be a mapping")
+                raise TypeError(
+                    f"Each outcome must be a mapping; got {type(outcome).__name__}"
+                )
             unknown = set(outcome) - _OUTCOME_FIELDS
             if unknown:
                 names = ", ".join(sorted(unknown))
-                raise ValueError(f"Unsupported outcome fields: {names}")
+                supported = ", ".join(sorted(_OUTCOME_FIELDS))
+                raise ValueError(
+                    f"Unsupported outcome fields: {names}. Supported fields: {supported}"
+                )
 
             kpi_id = outcome.get("kpi_id")
             if not isinstance(kpi_id, str) or not kpi_id.strip():
-                raise ValueError("Every outcome requires a non-empty kpi_id")
+                raise ValueError(
+                    f"Each outcome requires a non-empty kpi_id string; got {kpi_id!r}"
+                )
 
             entry = {key: value for key, value in outcome.items() if key in _OUTCOME_FIELDS}
             entry["kpi_id"] = kpi_id.strip()
