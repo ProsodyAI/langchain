@@ -158,7 +158,7 @@ with ProsodyClient(api_key=os.environ["PROSODY_API_KEY"]) as client:
     )
 ```
 
-The client also exposes `analyze_base64`, `extract_features`, `submit_correction`, and
+The client also exposes `analyze_base64`, `submit_correction`, and
 `submit_session_outcome` for the corresponding authenticated API resources.
 
 ## Development

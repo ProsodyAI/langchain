@@ -109,17 +109,6 @@ class ProsodyClient:
         response.raise_for_status()
         return response.json()
 
-    def extract_features(self, audio: AudioInput) -> dict[str, Any]:
-        """Extract the API's non-classifying prosodic feature vector."""
-        filename, content, content_type = self._audio_part(audio)
-        response = self._client.post(
-            f"{self.base_url}/v1/features/prosody",
-            headers=self._headers,
-            files={"file": (filename, content, content_type)},
-        )
-        response.raise_for_status()
-        return response.json()
-
     def submit_correction(
         self,
         prediction_id: str,

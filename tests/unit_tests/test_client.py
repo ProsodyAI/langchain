@@ -44,14 +44,7 @@ def test_analyze_uses_current_multipart_contract(tmp_path: Path) -> None:
     assert result["text"] == "hello"
 
 
-@pytest.mark.parametrize(
-    ("method_name", "expected_path"),
-    [
-        ("analyze_base64", "/v1/analyze/base64"),
-        ("extract_features", "/v1/features/prosody"),
-    ],
-)
-def test_current_auxiliary_endpoints(method_name: str, expected_path: str) -> None:
+def test_analyze_base64_uses_current_endpoint() -> None:
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -63,12 +56,9 @@ def test_current_auxiliary_endpoints(method_name: str, expected_path: str) -> No
         base_url="https://api.test",
         transport=httpx.MockTransport(handler),
     ) as client:
-        if method_name == "analyze_base64":
-            result = client.analyze_base64("YWJj", language="en", session_id="session-1")
-        else:
-            result = client.extract_features(b"audio")
+        result = client.analyze_base64("YWJj", language="en", session_id="session-1")
 
-    assert requests[0].url.path == expected_path
+    assert requests[0].url.path == "/v1/analyze/base64"
     assert requests[0].headers["X-API-Key"] == "test-api-key"
     assert result == {"ok": True}
 
